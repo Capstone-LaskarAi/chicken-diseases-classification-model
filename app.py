@@ -75,7 +75,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # Header
-    st.title("🐔 Chicken Disease Classification & AI Vet")
+    st.title("🐔 Chickbot: Chicken Disease Classification & AI Vet")
     
     # Initialize session state variables if they don't exist
     if 'predicted_disease' not in st.session_state:
@@ -88,6 +88,8 @@ def main():
         st.session_state.processed_image = None
     if 'llm_choice' not in st.session_state:
         st.session_state.llm_choice = "Ollama (Llama 3.2)"
+    if 'azure_deployment_name' not in st.session_state:
+        st.session_state.azure_deployment_name = "gpt-4.1" # Default Azure model
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
@@ -97,11 +99,23 @@ def main():
     # LLM selection in sidebar
     with st.sidebar:
         st.title("Settings")
+        llm_choice_options = ["Ollama (Llama 3.2)", "Azure OpenAI"]
         llm_choice = st.radio(
             "Select LLM for recommendations:",
-            ("Ollama (Llama 3.2)", "Azure OpenAI")
+            llm_choice_options,
+            index=llm_choice_options.index(st.session_state.llm_choice) # Set initial value from session state
         )
         st.session_state.llm_choice = llm_choice
+
+        # Azure model selection - only show if Azure OpenAI is selected
+        if st.session_state.llm_choice == "Azure OpenAI":
+            azure_model_options = ["gpt-4.1", "gpt-4o", "gpt-4o-mini", "grok-3-mini"]
+            azure_deployment_name = st.selectbox(
+                "Select Azure OpenAI Model:",
+                azure_model_options,
+                index=azure_model_options.index(st.session_state.azure_deployment_name) # Set initial value
+            )
+            st.session_state.azure_deployment_name = azure_deployment_name
         
         st.markdown("---")
         st.markdown("### About")
@@ -214,7 +228,13 @@ def main():
                     
                     # Generate recommendation using RAG pipeline with selected LLM
                     llm_selection = "Azure OpenAI" if st.session_state.llm_choice == "Azure OpenAI" else "Ollama"
-                    recommendation = asyncio.run(rag_pipeline(st.session_state.predicted_disease, llm_selection))
+                    azure_deployment_to_use = st.session_state.azure_deployment_name if llm_selection == "Azure OpenAI" else None
+                    
+                    recommendation = asyncio.run(rag_pipeline(
+                        st.session_state.predicted_disease, 
+                        llm_selection,
+                        azure_deployment_name=azure_deployment_to_use
+                    ))
                     
                     st.session_state.recommendation = recommendation
                     
@@ -236,7 +256,6 @@ def main():
             st.warning("Please upload and analyze an image in the 'Upload & Diagnose' tab first.")
         
         # Chat history section
-        st.markdown("---")
         st.subheader("Ask Follow-up Questions")
         
         # Display chat history
