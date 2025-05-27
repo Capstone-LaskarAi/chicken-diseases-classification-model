@@ -67,19 +67,45 @@ async def query_supabase_async(vector_store, query, top_k=3):
 # Generate recommendation using Ollama API
 async def generate_recommendation_ollama_async(disease, context=""):
     """Generate veterinary recommendations using Ollama API"""
-    prompt = f"""You are an expert veterinarian specializing in poultry diseases. 
-    Based on an image analysis of chicken feces, the system has detected: {disease}.
+    prompt = f"""Sebagai dokter hewan yang berpengalaman, berikan rekomendasi yang komprehensif dan mudah dipahami dalam bahasa Indonesia dengan format berikut:
+
+    **🔍 PENJELASAN KONDISI**
     
+    Jelaskan dengan bahasa yang sederhana apa itu {disease} dan mengapa kondisi ini terjadi pada ayam. Berikan informasi yang menenangkan namun informatif untuk peternak yang mungkin khawatir dengan kondisi ternaknya.
+
     Context from veterinary knowledge base:
     {context}
     
-    Please provide:
-    1. A brief explanation of this condition
-    2. Common symptoms to look for in the chickens
-    3. Recommended immediate actions for the farmer
-    4. Prevention measures
+    **🚨 GEJALA-GEJALA YANG PERLU DIPERHATIKAN**
     
-    Keep your response concise and informative.
+    • **Pada kotoran:** [Deskripsikan perubahan warna, tekstur, dan konsistensi]
+    • **Perilaku ayam:** [Gejala behavioral yang mudah diamati]
+    • **Kondisi fisik:** [Tanda-tanda fisik pada ayam]
+    • **Nafsu makan & minum:** [Perubahan pola makan dan minum]
+
+    **⚡ TINDAKAN SEGERA UNTUK PETERNAK**
+    
+    • **Langkah darurat (24 jam pertama):** [Tindakan prioritas tinggi]
+    • **Isolasi dan pengamatan:** [Cara mengisolasi ayam yang sakit]
+    • **Manajemen pakan dan air:** [Penyesuaian pemberian makan]
+    • **Kapan harus memanggil dokter hewan:** [Indikator untuk konsultasi profesional]
+
+    **🛡️ LANGKAH PENCEGAHAN JANGKA PANJANG**
+    
+    • **Sanitasi kandang:** [Tips kebersihan kandang yang praktis]
+    • **Manajemen pakan:** [Kualitas dan cara pemberian pakan]
+    • **Program vaksinasi:** [Jadwal vaksinasi yang direkomendasikan]
+    • **Monitoring kesehatan rutin:** [Checklist harian untuk peternak]
+
+    **💡 TIPS PRAKTIS DARI DOKTER HEWAN**
+    
+    Berikan 2-3 tips khusus yang bisa langsung diterapkan peternak, termasuk bahan-bahan alami atau metode sederhana yang bisa membantu pemulihan atau pencegahan.
+
+    **⚠️ PERHATIAN KHUSUS**
+    
+    Sampaikan hal-hal penting yang perlu diwaspadai dan kapan kondisi ini bisa menjadi serius. Berikan motivasi dan dukungan kepada peternak.
+
+    Gunakan bahasa yang ramah, empati, mudah dipahami, dan praktis untuk peternak Indonesia. Berikan penjelasan dengan gaya konsultasi dokter hewan yang profesional namun hangat.
     """
     
     try:
@@ -103,28 +129,74 @@ async def generate_recommendation_ollama_async(disease, context=""):
         return f"Error connecting to Ollama: {str(e)}"
 
 # Generate recommendation using Azure OpenAI API
-async def generate_recommendation_azure_async(disease, context=""):
+async def generate_recommendation_azure_async(disease, context="", deployment_name=None):
     """Generate veterinary recommendations using Azure OpenAI API"""
-    prompt = f"""You are an expert veterinarian specializing in poultry diseases. 
-    Based on an image analysis of chicken feces, the system has detected: {disease}.
+    prompt = f"""Sebagai dokter hewan yang berpengalaman, berikan rekomendasi yang komprehensif dan mudah dipahami dalam bahasa Indonesia dengan format berikut:
+
+    🔍 PENJELASAN KONDISI
     
+    Jelaskan dengan bahasa yang sederhana apa itu {disease} dan mengapa kondisi ini terjadi pada ayam. Berikan informasi yang menenangkan namun informatif untuk peternak yang mungkin khawatir dengan kondisi ternaknya.
+
     Context from veterinary knowledge base:
     {context}
+
+    🚨 GEJALA-GEJALA YANG PERLU DIPERHATIKAN
     
-    Please provide:
-    1. A brief explanation of this condition
-    2. Common symptoms to look for in the chickens
-    3. Recommended immediate actions for the farmer
-    4. Prevention measures
+    • Pada kotoran: [Deskripsikan perubahan warna, tekstur, dan konsistensi]
+    • Perilaku ayam: [Gejala behavioral yang mudah diamati]
+    • Kondisi fisik: [Tanda-tanda fisik pada ayam]
+    • Nafsu makan & minum: [Perubahan pola makan dan minum]
+
+    ⚡ TINDAKAN SEGERA UNTUK PETERNAK
     
-    Keep your response concise and informative.
+    • Langkah darurat (24 jam pertama): [Tindakan prioritas tinggi]
+    • Isolasi dan pengamatan: [Cara mengisolasi ayam yang sakit]
+    • Manajemen pakan dan air: [Penyesuaian pemberian makan]
+    • Kapan harus memanggil dokter hewan: [Indikator untuk konsultasi profesional]
+
+    🛡️ LANGKAH PENCEGAHAN JANGKA PANJANG
+    
+    • Sanitasi kandang: [Tips kebersihan kandang yang praktis]
+    • Manajemen pakan: [Kualitas dan cara pemberian pakan]
+    • Program vaksinasi: [Jadwal vaksinasi yang direkomendasikan]
+    • Monitoring kesehatan rutin: [Checklist harian untuk peternak]
+
+    💡 TIPS PRAKTIS DARI DOKTER HEWAN
+    
+    Berikan 2-3 tips khusus yang bisa langsung diterapkan peternak, termasuk bahan-bahan alami atau metode sederhana yang bisa membantu pemulihan atau pencegahan.
+
+    ⚠️ PERHATIAN KHUSUS
+
+    - Kalau nggak nemu informasi yang relevan, jawab pakai kalimat ini:
+      "Maaf ya, aku belum nemu info yang cocok sama pertanyaan kamu dari data yang ada."
+
+    - Kamu hanya boleh jawab pertanyaan seputar project yang di kerjain sama Tim Eztrip, diluar itu untuk pertanyaan yang kurang relevan jawab pakai kalimat ini:
+       "Maaf ya, pertanyaannya diluar konteks nih! coba tanyakan hal lain yang relevan terkait penanganan dan pencegahan penyakit ayam"
+    
+    - Sampaikan hal-hal penting yang perlu diwaspadai dan kapan kondisi ini bisa menjadi serius. Berikan motivasi dan dukungan kepada peternak.
+
+    - Gunakan bahasa yang ramah, empati, mudah dipahami, dan praktis untuk peternak Indonesia. Berikan penjelasan dengan gaya friendly gen z.
+    - Buat menggunakan format paragraf yang mudah dibaca, dengan poin-poin penting yang jelas dan terstruktur.
     """
     
     try:
         azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
         api_key = os.environ.get("AZURE_OPENAI_KEY")
-        deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
+        # Menggunakan deployment_name dari argumen fungsi, bukan dari env var secara langsung di sini
+        # deployment_name_to_use = deployment_name if deployment_name else os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
         
+        if not deployment_name:
+            # Fallback atau error jika tidak ada deployment_name yang disediakan, sesuai kebutuhan
+            # Untuk saat ini, kita asumsikan deployment_name akan selalu ada jika Azure dipilih
+            # Atau bisa menggunakan default dari environment variable jika tidak ada yang dipilih
+            default_deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
+            if not default_deployment_name:
+                raise ValueError("Azure OpenAI deployment name not provided and no default in environment.")
+            deployment_name_to_use = default_deployment_name
+            st.warning(f"Azure deployment name not explicitly selected, using default: {deployment_name_to_use}")
+        else:
+            deployment_name_to_use = deployment_name
+
         headers = {
             "Content-Type": "application/json",
             "api-key": api_key,
@@ -138,7 +210,7 @@ async def generate_recommendation_azure_async(disease, context=""):
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{azure_endpoint}/openai/deployments/{deployment_name}/chat/completions?api-version=2025-01-01-preview",
+                f"{azure_endpoint}/openai/deployments/{deployment_name_to_use}/chat/completions?api-version=2025-01-01-preview",
                 headers=headers,
                 json=payload
             ) as response:
@@ -153,7 +225,7 @@ async def generate_recommendation_azure_async(disease, context=""):
         return f"Error connecting to Azure OpenAI: {str(e)}"
 
 # RAG Pipeline
-async def rag_pipeline(disease, llm_choice):
+async def rag_pipeline(disease, llm_choice, azure_deployment_name=None):
     """Complete RAG pipeline for generating recommendations"""
     try:
         # 1. Create query from disease
@@ -169,7 +241,7 @@ async def rag_pipeline(disease, llm_choice):
         
         # 3. Generate response based on LLM choice
         if llm_choice == "Azure OpenAI":
-            recommendation = await generate_recommendation_azure_async(disease, context)
+            recommendation = await generate_recommendation_azure_async(disease, context, deployment_name=azure_deployment_name)
         else:  # Ollama
             recommendation = await generate_recommendation_ollama_async(disease, context)
             
@@ -179,6 +251,6 @@ async def rag_pipeline(disease, llm_choice):
         st.error(f"Error in RAG pipeline: {str(e)}")
         # Fallback to generate a response without RAG
         if llm_choice == "Azure OpenAI":
-            return await generate_recommendation_azure_async(disease, "")
+            return await generate_recommendation_azure_async(disease, "", deployment_name=azure_deployment_name)
         else:
             return await generate_recommendation_ollama_async(disease, "")
