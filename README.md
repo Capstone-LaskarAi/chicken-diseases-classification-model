@@ -138,40 +138,49 @@ model.compile(optimizer='adam',
               metrics=['accuracy'])
 ```
 
-### Proses Pelatihan
-
-Model dilatih selama 10 epoch:
-
-```bash
-Epoch 1/10 - accuracy: 0.7475 - val_accuracy: 0.8368
-...
-Epoch 10/10 - accuracy: 0.9710 - val_accuracy: 0.9524
-```
-
 ---
 
 ## 📈 Evaluation
 
-Model menunjukkan performa sangat baik:
+Model menunjukkan performa yang sangat baik pada data validasi dan data uji (test):
 
-- **Akurasi validasi akhir**: 95.24%
-- **Akurasi uji akhir**: 95.13%
-- **Tidak overfitting** signifikan
-- Inferensi cepat dan efisien untuk lingkungan produksi ringan
+- **Akurasi validasi terbaik**: 97.02% (pada epoch ke-12, dengan early stopping)
+- **Akurasi uji akhir (test accuracy)**: 95.90%
+- **Tidak terjadi overfitting signifikan**: gap antara training, validation, dan test accuracy sangat kecil.
+- **Loss pada data validasi dan test juga rendah**, menandakan model mampu melakukan generalisasi dengan baik.
+- **Augmentasi data** dan teknik balancing (SMOTE) terbukti efektif meningkatkan performa dan generalisasi model.
+
+Contoh hasil training:
+
+```
+Epoch 12/30
+210/210 ━━━━━━━━━━━━━━━━━━━━ ... - accuracy: 0.9722 - loss: 0.0785 - val_accuracy: 0.9702 - val_loss: 0.0966
+Epoch 15: early stopping
+Restoring model weights from the end of the best epoch: 12.
+
+25/25 ━━━━━━━━━━━━━━━━━━━━ ... - accuracy: 0.9579 - loss: 0.1524
+
+Test Accuracy: 95.90%
+```
 
 ---
 
 ## 📅 Conclusion & Insights
 
-- Arsitektur MobileNetV2 berhasil mengklasifikasikan gambar kotoran ayam dengan **akurasi tinggi**.
-- Pendekatan transfer learning efektif untuk mengatasi keterbatasan data.
-- Augmentasi data sangat berperan dalam meningkatkan generalisasi model.
+- **MobileNetV2** berhasil mengklasifikasikan gambar kotoran ayam dengan **akurasi validasi hingga 97%** dan **akurasi test 95.9%**.
+- **Augmentasi data** dan teknik balancing (SMOTE) sangat berperan dalam meningkatkan generalisasi dan mengurangi overfitting.
+- Model sangat layak untuk deployment dan dapat diintegrasikan ke aplikasi mobile/web untuk deteksi dini penyakit unggas.
+- **Rekomendasi:** Lanjutkan ke tahap deployment, monitoring model drift, dan eksplorasi interpretabilitas model (misal Grad-CAM).
+
+---
 
 ### Insight Bisnis
 
-- Solusi ini berpotensi diintegrasikan ke **aplikasi mobile** untuk diagnosis mandiri.
-- Meningkatkan **akses kesehatan hewan** di daerah terpencil.
-- Mencegah potensi **kerugian ekonomi** akibat wabah penyakit unggas.
+- Solusi ini siap diimplementasikan untuk membantu peternak dalam deteksi dini penyakit unggas secara otomatis dan efisien.
+- Potensi integrasi ke aplikasi mobile untuk memperluas akses di daerah terpencil.
+- Dapat mengurangi kerugian ekonomi akibat wabah penyakit unggas secara signifikan.
+
+---
 
 ### Rekomendasi Lanjutan
 
@@ -180,4 +189,4 @@ Model menunjukkan performa sangat baik:
 - 🌐 Penambahan kelas penyakit lainnya (misal: Avian Influenza).
 - ⌛ Monitoring **model drift** untuk pembelajaran berkelanjutan.
 
-✅ Dengan akurasi tinggi dan efisiensi tinggi, model ini sangat layak untuk dilanjutkan ke tahap implementasi lapangan.
+✅ Dengan akurasi tinggi dan generalisasi yang baik, model ini sangat layak untuk implementasi di lapangan.
