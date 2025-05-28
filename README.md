@@ -36,9 +36,13 @@ Solusi yang dikembangkan berupa model supervised learning berbasis deep learning
 
 ## 📊 Data Understanding
 
+### Sumber Data
+
+Dataset diambil dari Kaggle: [Chicken Disease Dataset](https://www.kaggle.com/api/v1/datasets/download/efoeetienneblavo/chicken-disease-dataset)
+
 ### Sumber dan Karakteristik Dataset
 
-- Dataset: [Chicken Disease Dataset](https://www.kaggle.com/api/v1/datasets/download/efoeetienneblavo/chicken-disease-dataset) (Kaggle)
+- Dataset: Chicken Disease Dataset (Kaggle)
 - Jumlah gambar: 6.508 (train), 778 (val), 781 (test)
 - Resolusi: 224x224 piksel
 - Format: RGB (.jpg)
@@ -62,7 +66,7 @@ Distribusi label tidak seimbang sehingga perlu penanganan khusus seperti augment
 
 Visualisasi gambar dan distribusi label dilakukan untuk memastikan kualitas dan representasi data:
 
-![Distribusi Kelas](https://github.com/user-attachments/assets/46eddaa8-c43d-42f8-ae48-daa205f3b9c4)
+![Distribusi Kelas](image.png)
 
 Label dikodekan sebagai berikut:
 
