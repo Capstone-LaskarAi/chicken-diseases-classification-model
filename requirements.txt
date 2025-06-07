@@ -40,6 +40,7 @@ langchain-openai==0.3.7
 langchain-text-splitters==0.3.6
 langsmith==0.3.11
 markdown-it-py==3.0.0
+matplotlib
 MarkupSafe==3.0.2
 marshmallow==3.26.1
 mdurl==0.1.2
