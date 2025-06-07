@@ -9,7 +9,8 @@ import os
 
 # Import dari modul terpisah
 from model_utils import load_model, preprocess_image, predict_disease, CLASS_LABELS
-from LLM_service import rag_pipeline, generate_recommendation_ollama_async, generate_recommendation_azure_async
+from LLM_service import rag_pipeline
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Fungsi untuk menyimpan gambar yang diupload
 def save_uploaded_image(uploaded_file):
@@ -40,8 +41,7 @@ def main():
         page_icon="🐔",
         layout="wide"
     )
-    
-    # Custom CSS
+      # Custom CSS
     st.markdown("""
     <style>
     .main {
@@ -89,9 +89,8 @@ def main():
     if 'llm_choice' not in st.session_state:
         st.session_state.llm_choice = "Ollama (Llama 3.2)"
     if 'azure_deployment_name' not in st.session_state:
-        st.session_state.azure_deployment_name = "gpt-4.1" # Default Azure model
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
+        st.session_state.azure_deployment_name = "gpt-4.1" # Default Azure model    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []  # Store as simple dict format for compatibility
     
     # Create tabs
     tab1, tab2 = st.tabs(["Upload & Diagnose", "AI Vet Chatbot"])
@@ -121,10 +120,9 @@ def main():
         st.markdown("### About")
         st.markdown("""
         This app uses AI to identify chicken diseases from feces images and provide veterinary recommendations.
-        
-        **Models used:**
+          **Models used:**
         - Image classification: MobileNetV2
-        - Text embedding: bge-m3 (Ollama)
+        - Text embedding: text-embedding-3-large (Azure OpenAI)
         - LLM: Llama 3.2 (Ollama) or Gpt-4.1 (Azure)
         """)
     
@@ -225,15 +223,15 @@ def main():
             if st.button("Generate Recommendations"):
                 with st.spinner("Generating expert recommendations..."):
                     start_time = time.time()
-                    
-                    # Generate recommendation using RAG pipeline with selected LLM
+                      # Generate recommendation using RAG pipeline with selected LLM
                     llm_selection = "Azure OpenAI" if st.session_state.llm_choice == "Azure OpenAI" else "Ollama"
                     azure_deployment_to_use = st.session_state.azure_deployment_name if llm_selection == "Azure OpenAI" else None
                     
                     recommendation = asyncio.run(rag_pipeline(
                         st.session_state.predicted_disease, 
                         llm_selection,
-                        azure_deployment_name=azure_deployment_to_use
+                        azure_deployment_name=azure_deployment_to_use,
+                        chat_history=st.session_state.chat_history
                     ))
                     
                     st.session_state.recommendation = recommendation
@@ -258,47 +256,41 @@ def main():
         # Chat history section
         st.subheader("Ask Follow-up Questions")
         
-        # Display chat history
-        for message in st.session_state.chat_history:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        # Create a container for chat messages
+        chat_container = st.container()
+          # Display chat history in the container
+        with chat_container:
+            for message in st.session_state.chat_history:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
         
-        # Chat input
+        # Chat input - this will naturally appear at the bottom
         if st.session_state.predicted_disease:  # Only show if we have a prediction
             user_question = st.chat_input("Ask a question about this condition...")
             
             if user_question:
                 # Add user message to chat history
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
-                
-                # Display user message
-                with st.chat_message("user"):
-                    st.markdown(user_question)
-                
-                # Generate response
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking..."):
-                        # Create context from previous recommendation
-                        context = f"Disease: {st.session_state.predicted_disease}\n\n"
-                        if st.session_state.recommendation:
-                            context += f"Previous information: {st.session_state.recommendation}\n\n"
-                        
-                        # Get response based on selected LLM
-                        if st.session_state.llm_choice == "Azure OpenAI":
-                            response = asyncio.run(generate_recommendation_azure_async(
-                                st.session_state.predicted_disease,
-                                context + f"User question: {user_question}"
-                            ))
-                        else:
-                            response = asyncio.run(generate_recommendation_ollama_async(
-                                st.session_state.predicted_disease,
-                                context + f"User question: {user_question}"
-                            ))
-                        
-                        st.markdown(response)
-                        
-                        # Add assistant response to chat history
-                        st.session_state.chat_history.append({"role": "assistant", "content": response})
+                  # Generate response
+                with st.spinner("Thinking..."):
+                    # Use the new rag_pipeline with chat history
+                    llm_selection = "Azure OpenAI" if st.session_state.llm_choice == "Azure OpenAI" else "Ollama"
+                    azure_deployment_to_use = st.session_state.azure_deployment_name if llm_selection == "Azure OpenAI" else None
+                    
+                    response = asyncio.run(rag_pipeline(
+                        st.session_state.predicted_disease,
+                        llm_selection,
+                        azure_deployment_name=azure_deployment_to_use,
+                        user_question=user_question,
+                        predicted_disease=st.session_state.predicted_disease,
+                        chat_history=st.session_state.chat_history
+                    ))
+                    
+                    # Add assistant response to chat history
+                    st.session_state.chat_history.append({"role": "assistant", "content": response})
+                    
+                    # Rerun to update the display
+                    st.rerun()
         else:
             st.info("Upload and analyze an image first to enable the chat feature.")
 
