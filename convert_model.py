@@ -48,8 +48,8 @@ def recreate_model():
     
     return model
 
-def try_convert_model(input_model_path="model/chicken_disease_model.h5", 
-                     output_model_path="model/chicken_disease_model_fixed.h5",
+def try_convert_model(input_model_path="model/fix_chicken_disease_model.h5", 
+                     output_model_path="model/updated_model.h5",
                      output_saved_model_path="saved_model"):
     """
     Try to convert an existing model to a more compatible format

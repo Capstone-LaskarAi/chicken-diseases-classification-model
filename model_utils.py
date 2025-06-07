@@ -36,7 +36,7 @@ def preprocess_image(img):
     return img_array
 
 # Model conversion utility (for compatibility issues)
-def convert_model_if_needed(model_path="model/chicken_disease_model.h5", force_convert=False):
+def convert_model_if_needed(model_path="model/fix_chicken_disease_model.h5", force_convert=False):
     """
     Convert the model to a format compatible with the current TF version if needed.
     This is useful when there are version compatibility issues.
@@ -94,10 +94,10 @@ def convert_model_if_needed(model_path="model/chicken_disease_model.h5", force_c
 def load_model():
     try:
         # First try the fixed model if it exists
-        if os.path.exists("model/chicken_disease_model_fixed.h5"):
+        if os.path.exists("model/updated_model.h5"):
             try:
                 st.info("Attempting to load fixed model version...")
-                model = tf.keras.models.load_model("model/chicken_disease_model_fixed.h5")
+                model = tf.keras.models.load_model("model/updated_model.h5")
                 st.success("Fixed model loaded successfully!")
                 return model
             except Exception as fixed_error:
@@ -117,7 +117,7 @@ def load_model():
         # If we reach here, try with the original model file
         try:
             st.info("Attempting standard model loading...")
-            model = tf.keras.models.load_model("model/chicken_disease_model.h5")
+            model = tf.keras.models.load_model("model/fix_chicken_disease_model.h5")
             st.success("Model loaded successfully!")
             return model
         except Exception as first_error:
@@ -137,7 +137,7 @@ def load_model():
                         if success:
                             st.success("Batch shape error fixed successfully!")
                             # Attempt to load the fixed model
-                            fixed_model_path = "model/chicken_disease_model_fixed.h5"
+                            fixed_model_path = "model/updated_model.h5"
                             if os.path.exists(fixed_model_path):
                                 try:
                                     fixed_model = tf.keras.models.load_model(fixed_model_path)
@@ -167,7 +167,7 @@ def load_model():
                 custom_objects = {}
                 
                 model = tf.keras.models.load_model(
-                    "model/chicken_disease_model.h5", 
+                    "model/fix_chicken_disease_model.h5", 
                     compile=False,
                     custom_objects=custom_objects
                 )

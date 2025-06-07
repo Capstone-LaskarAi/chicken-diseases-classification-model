@@ -1,120 +1,233 @@
 import os
 import asyncio
-import aiohttp
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_community.vectorstores import SupabaseVectorStore
-from langchain_community.embeddings import OllamaEmbeddings
-from supabase.client import Client, create_client
+
+# import langchain
+from langchain.agents import AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain.agents import create_tool_calling_agent
+from langchain import hub
+from langchain_community.vectorstores import Pinecone
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+from langchain_core.tools import tool
+from pinecone import Pinecone as PineconeClient
 
 # Load environment variables
 load_dotenv()
 
-# Supabase & Embeddings setup
-supabase_url = os.environ.get("SUPABASE_URL")
-supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-supabase: Client = create_client(supabase_url, supabase_key)
-embeddings = OllamaEmbeddings(model="bge-m3:latest")
-vector_store = SupabaseVectorStore(
-    embedding=embeddings,
-    client=supabase,
-    table_name="documents",
-    query_name="match_documents",
-    chunk_size=1000,
+# Set Azure OpenAI environment variables
+os.environ["AZURE_OPENAI_ENDPOINT"] = os.getenv("AZURE_OPENAI_ENDPOINT")
+os.environ["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_KEY")
+os.environ["AZURE_OPENAI_API_VERSION"] = "2024-02-01"
+
+# initiating pinecone
+pc = PineconeClient(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
+
+# initiating embeddings model
+embeddings = AzureOpenAIEmbeddings(
+    model="text-embedding-3-large",
+    azure_deployment="text-embedding-3-large",
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_KEY"),
+    api_version="2024-02-01"
 )
 
-# Get embeddings from Ollama
-async def get_embeddings_async(text, model="bge-m3"):
-    """Get embeddings from Ollama API asynchronously"""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "http://localhost:11434/api/embeddings",
-                json={"model": model, "prompt": text}
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("embedding")
-                else:
-                    st.error(f"Error from Ollama embeddings API: {await response.text()}")
-                    return None
-    except Exception as e:
-        st.error(f"Error getting embeddings: {str(e)}")
+# initiating vector store
+vector_store = Pinecone.from_existing_index(
+    index_name=os.getenv("PINECONE_INDEX_NAME"),
+    embedding=embeddings,
+    namespace="chickbot_docs"
+)
+
+# initiating llm - support both Azure and Ollama
+def get_llm(llm_choice="Azure OpenAI", azure_deployment_name="gpt-4o"):
+    """Get LLM based on choice"""
+    if llm_choice == "Azure OpenAI":
+        return AzureChatOpenAI(
+            model="gpt-4o",
+            azure_deployment=azure_deployment_name,
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version="2024-02-01",
+            temperature=0
+        )
+    else:
+        # For Ollama, we'll use a simple fallback since langchain-community doesn't have direct Ollama support
+        # We'll handle this in the pipeline
         return None
 
-# Synchronous version for simpler usage
-def get_embeddings(text, model="bge-m3"):
-    """Synchronous wrapper for get_embeddings_async"""
-    return asyncio.run(get_embeddings_async(text, model))
+# pulling prompt from hub
+prompt = hub.pull("hwchase17/openai-functions-agent")
 
-# Query Supabase for similar documents
-async def query_supabase_async(vector_store, query, top_k=3):
-    """Query vector store for similar documents"""
+# function to check if question is related to chicken/poultry disease management
+def is_poultry_related_question(question: str) -> bool:
+    """Check if the question is related to chicken/poultry disease management."""
+    # Keywords related to poultry and diseases
+    poultry_keywords = [
+        'ayam', 'unggas', 'chicken', 'poultry', 'bebek', 'itik', 'burung', 
+        'penyakit', 'disease', 'sakit', 'gejala', 'symptoms', 'pengobatan', 
+        'treatment', 'obat', 'medicine', 'vaksin', 'vaccine', 'pencegahan', 
+        'prevention', 'ternak', 'peternakan', 'farm', 'kandang', 'coop',
+        'virus', 'bakteri', 'parasit', 'infeksi', 'infection', 'flu burung',
+        'Newcastle', 'tetelo', 'berak kapur', 'snot', 'crd', 'coryza',
+        'kolera', 'cholera', 'cacingan', 'kutu', 'tungau', 'stress panas', 
+        'tabel', 'healthy', 'detected', 'image', 'analysis'
+    ]
+    
+    question_lower = question.lower()
+    return any(keyword.lower() in question_lower for keyword in poultry_keywords)
+
+# creating the retriever tool
+@tool(response_format="content_and_artifact")
+def retrieve(query: str):
+    """Retrieve information related to a query."""
+    retrieved_docs = vector_store.similarity_search(query, k=2)
+    serialized = "\n\n".join(
+        (f"Source: {doc.metadata}\n" f"Content: {doc.page_content}")
+        for doc in retrieved_docs
+    )
+    return serialized, retrieved_docs
+
+# combining all tools
+tools = [retrieve]
+
+# initiating vector store
+vector_store = Pinecone.from_existing_index(
+    index_name=os.getenv("PINECONE_INDEX_NAME"),
+    embedding=embeddings,
+    namespace="chickbot_docs"
+)
+
+# initiating llm - support both Azure and Ollama
+def get_llm(llm_choice="Azure OpenAI", azure_deployment_name="gpt-4o"):
+    """Get LLM based on choice"""
+    if llm_choice == "Azure OpenAI":
+        return AzureChatOpenAI(
+            model="gpt-4o",
+            azure_deployment=azure_deployment_name,
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version="2024-02-01",
+            temperature=0
+        )
+    else:
+        # For Ollama, we'll use a simple fallback since langchain-community doesn't have direct Ollama support
+        # We'll handle this in the pipeline
+        return None
+
+# pulling prompt from hub
+prompt = hub.pull("hwchase17/openai-functions-agent")
+
+# function to check if question is related to chicken/poultry disease management
+def is_poultry_related_question(question: str) -> bool:
+    """Check if the question is related to chicken/poultry disease management."""
+    # Keywords related to poultry and diseases
+    poultry_keywords = [
+        'ayam', 'unggas', 'chicken', 'poultry', 'bebek', 'itik', 'burung', 
+        'penyakit', 'disease', 'sakit', 'gejala', 'symptoms', 'pengobatan', 
+        'treatment', 'obat', 'medicine', 'vaksin', 'vaccine', 'pencegahan', 
+        'prevention', 'ternak', 'peternakan', 'farm', 'kandang', 'coop',
+        'virus', 'bakteri', 'parasit', 'infeksi', 'infection', 'flu burung',
+        'Newcastle', 'tetelo', 'berak kapur', 'snot', 'crd', 'coryza',
+        'kolera', 'cholera', 'cacingan', 'kutu', 'tungau', 'stress panas', 'tabel',
+        'healthy', 'detected', 'image', 'analysis', 'coccidiosis', 'salmonella', 'newcastle disease',
+        
+    ]
+    
+    question_lower = question.lower()
+    return any(keyword.lower() in question_lower for keyword in poultry_keywords)
+
+# creating the retriever tool
+@tool(response_format="content_and_artifact")
+def retrieve(query: str):
+    """Retrieve information related to a query."""
+    retrieved_docs = vector_store.similarity_search(query, k=2)
+    serialized = "\n\n".join(
+        (f"Source: {doc.metadata}\n" f"Content: {doc.page_content}")
+        for doc in retrieved_docs
+    )
+    return serialized, retrieved_docs
+
+# combining all tools
+tools = [retrieve]
+
+# RAG Pipeline using Agent for Azure OpenAI
+def rag_pipeline_agent_azure(query, chat_history=None, predicted_disease=None, azure_deployment_name="gpt-4o"):
+    """Complete RAG pipeline using LangChain agent for Azure OpenAI"""
     try:
-        # Use similarity_search from vector_store
-        docs = vector_store.similarity_search(query, k=top_k)
-        # Format results to be similar to Pinecone
-        matches = []
-        for doc in docs:
-            matches.append({
-                "metadata": {"text": doc.page_content}
+        # Get Azure LLM
+        llm = get_llm("Azure OpenAI", azure_deployment_name)
+        
+        # Create agent
+        agent = create_tool_calling_agent(llm, tools, prompt)
+        agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+        
+        # Create a comprehensive query if we have disease context
+        if predicted_disease:
+            enhanced_query = f"Penyakit {predicted_disease}: {query}"
+        else:
+            enhanced_query = query
+            
+        # Check if the question is related to poultry disease management
+        if is_poultry_related_question(enhanced_query):
+            # invoking the agent
+            result = agent_executor.invoke({
+                "input": enhanced_query, 
+                "chat_history": chat_history or []
             })
-        return {"matches": matches}
+            return result["output"]
+        else:
+            # provide default response for out-of-context questions
+            return "Maaf ya, aku belum nemu info yang cocok sama pertanyaan kamu dari data yang ada."
+            
     except Exception as e:
-        st.error(f"Error querying Supabase: {str(e)}")
-        return None
+        st.error(f"Error in RAG pipeline: {str(e)}")
+        return f"Terjadi kesalahan dalam memproses pertanyaan: {str(e)}"
 
-# Generate recommendation using Ollama API
-async def generate_recommendation_ollama_async(disease, context=""):
-    """Generate veterinary recommendations using Ollama API"""
-    prompt = f"""Sebagai dokter hewan yang berpengalaman, berikan rekomendasi yang komprehensif dan mudah dipahami dalam bahasa Indonesia dengan format berikut:
-
-    **🔍 PENJELASAN KONDISI**
-    
-    Jelaskan dengan bahasa yang sederhana apa itu {disease} dan mengapa kondisi ini terjadi pada ayam. Berikan informasi yang menenangkan namun informatif untuk peternak yang mungkin khawatir dengan kondisi ternaknya.
-
-    Context from veterinary knowledge base:
-    {context}
-    
-    **🚨 GEJALA-GEJALA YANG PERLU DIPERHATIKAN**
-    
-    • **Pada kotoran:** [Deskripsikan perubahan warna, tekstur, dan konsistensi]
-    • **Perilaku ayam:** [Gejala behavioral yang mudah diamati]
-    • **Kondisi fisik:** [Tanda-tanda fisik pada ayam]
-    • **Nafsu makan & minum:** [Perubahan pola makan dan minum]
-
-    **⚡ TINDAKAN SEGERA UNTUK PETERNAK**
-    
-    • **Langkah darurat (24 jam pertama):** [Tindakan prioritas tinggi]
-    • **Isolasi dan pengamatan:** [Cara mengisolasi ayam yang sakit]
-    • **Manajemen pakan dan air:** [Penyesuaian pemberian makan]
-    • **Kapan harus memanggil dokter hewan:** [Indikator untuk konsultasi profesional]
-
-    **🛡️ LANGKAH PENCEGAHAN JANGKA PANJANG**
-    
-    • **Sanitasi kandang:** [Tips kebersihan kandang yang praktis]
-    • **Manajemen pakan:** [Kualitas dan cara pemberian pakan]
-    • **Program vaksinasi:** [Jadwal vaksinasi yang direkomendasikan]
-    • **Monitoring kesehatan rutin:** [Checklist harian untuk peternak]
-
-    **💡 TIPS PRAKTIS DARI DOKTER HEWAN**
-    
-    Berikan 2-3 tips khusus yang bisa langsung diterapkan peternak, termasuk bahan-bahan alami atau metode sederhana yang bisa membantu pemulihan atau pencegahan.
-
-    **⚠️ PERHATIAN KHUSUS**
-    
-    Sampaikan hal-hal penting yang perlu diwaspadai dan kapan kondisi ini bisa menjadi serius. Berikan motivasi dan dukungan kepada peternak.
-
-    Gunakan bahasa yang ramah, empati, mudah dipahami, dan praktis untuk peternak Indonesia. Berikan penjelasan dengan gaya konsultasi dokter hewan yang profesional namun hangat.
-    """
+# RAG Pipeline using Ollama (fallback to simple implementation)
+async def rag_pipeline_ollama(query, chat_history=None, predicted_disease=None):
+    """RAG pipeline for Ollama - simplified implementation"""
+    import aiohttp
     
     try:
+        # Search for relevant documents
+        retrieved_docs = vector_store.similarity_search(query, k=2)
+        context = "\n\n".join([doc.page_content for doc in retrieved_docs])
+        
+        # Create prompt for Ollama
+        if predicted_disease:
+            enhanced_query = f"Penyakit {predicted_disease}: {query}"
+        else:
+            enhanced_query = query
+            
+        prompt_text = f"""Kamu adalah dokter hewan ahli penyakit unggas yang bertugas memberikan penjelasan komprehensif tentang penyakit pada ayam.
+
+        Panduan:
+        1. Kalau datanya ketemu, jawab dengan jelas, singkat, dan langsung ke intinya, pakai bahasa yang santai dan mudah dipahami.
+        2. Kalau nggak nemu informasi yang relevan, jawab pakai kalimat ini: "Maaf ya, aku belum nemu info yang cocok sama pertanyaan kamu dari data yang ada."
+        3. Jangan jawab pakai pengetahuan umum atau ngarang ya — fokus cuma ke data yang ada di vector store.
+        4. Tulis jawabannya dalam bentuk paragraf pendek, langsung ke poin pentingnya, tetap ramah, dan gunakan emote yang relevan.
+
+        Context from veterinary knowledge base:
+        {context}
+
+        Pertanyaan: {enhanced_query}
+        """
+        
+        # Check if question is poultry-related
+        if not is_poultry_related_question(enhanced_query):
+            return "Maaf ya, aku belum nemu info yang cocok sama pertanyaan kamu dari data yang ada."
+        
+        # Call Ollama API
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "http://localhost:11434/api/generate",
                 json={
                     "model": "llama3.2:3b",
-                    "prompt": prompt,
+                    "prompt": prompt_text,
                     "stream": False
                 }
             ) as response:
@@ -123,134 +236,66 @@ async def generate_recommendation_ollama_async(disease, context=""):
                     return data.get("response", "No response generated")
                 else:
                     error_text = await response.text()
-                    st.error(f"Error from Ollama API: {error_text}")
                     return f"Failed to generate recommendation. Error: {error_text}"
+                    
     except Exception as e:
-        return f"Error connecting to Ollama: {str(e)}"
+        st.error(f"Error in Ollama RAG pipeline: {str(e)}")
+        return f"Terjadi kesalahan dalam memproses pertanyaan: {str(e)}"
 
-# Generate recommendation using Azure OpenAI API
-async def generate_recommendation_azure_async(disease, context="", deployment_name=None):
-    """Generate veterinary recommendations using Azure OpenAI API"""
-    prompt = f"""Sebagai dokter hewan yang berpengalaman, berikan rekomendasi yang komprehensif dan mudah dipahami dalam bahasa Indonesia dengan format berikut:
-
-    🔍 PENJELASAN KONDISI
-    
-    Jelaskan dengan bahasa yang sederhana apa itu {disease} dan mengapa kondisi ini terjadi pada ayam. Berikan informasi yang menenangkan namun informatif untuk peternak yang mungkin khawatir dengan kondisi ternaknya.
-
-    Context from veterinary knowledge base:
-    {context}
-
-    🚨 GEJALA-GEJALA YANG PERLU DIPERHATIKAN
-    
-    • Pada kotoran: [Deskripsikan perubahan warna, tekstur, dan konsistensi]
-    • Perilaku ayam: [Gejala behavioral yang mudah diamati]
-    • Kondisi fisik: [Tanda-tanda fisik pada ayam]
-    • Nafsu makan & minum: [Perubahan pola makan dan minum]
-
-    ⚡ TINDAKAN SEGERA UNTUK PETERNAK
-    
-    • Langkah darurat (24 jam pertama): [Tindakan prioritas tinggi]
-    • Isolasi dan pengamatan: [Cara mengisolasi ayam yang sakit]
-    • Manajemen pakan dan air: [Penyesuaian pemberian makan]
-    • Kapan harus memanggil dokter hewan: [Indikator untuk konsultasi profesional]
-
-    🛡️ LANGKAH PENCEGAHAN JANGKA PANJANG
-    
-    • Sanitasi kandang: [Tips kebersihan kandang yang praktis]
-    • Manajemen pakan: [Kualitas dan cara pemberian pakan]
-    • Program vaksinasi: [Jadwal vaksinasi yang direkomendasikan]
-    • Monitoring kesehatan rutin: [Checklist harian untuk peternak]
-
-    💡 TIPS PRAKTIS DARI DOKTER HEWAN
-    
-    Berikan 2-3 tips khusus yang bisa langsung diterapkan peternak, termasuk bahan-bahan alami atau metode sederhana yang bisa membantu pemulihan atau pencegahan.
-
-    ⚠️ PERHATIAN KHUSUS
-
-    - Kalau nggak nemu informasi yang relevan, jawab pakai kalimat ini:
-      "Maaf ya, aku belum nemu info yang cocok sama pertanyaan kamu dari data yang ada."
-
-    - Kamu hanya boleh jawab pertanyaan seputar project yang di kerjain sama Tim Eztrip, diluar itu untuk pertanyaan yang kurang relevan jawab pakai kalimat ini:
-       "Maaf ya, pertanyaannya diluar konteks nih! coba tanyakan hal lain yang relevan terkait penanganan dan pencegahan penyakit ayam"
-    
-    - Sampaikan hal-hal penting yang perlu diwaspadai dan kapan kondisi ini bisa menjadi serius. Berikan motivasi dan dukungan kepada peternak.
-
-    - Gunakan bahasa yang ramah, empati, mudah dipahami, dan praktis untuk peternak Indonesia. Berikan penjelasan dengan gaya friendly gen z.
-    - Buat menggunakan format paragraf yang mudah dibaca, dengan poin-poin penting yang jelas dan terstruktur.
-    """
-    
-    try:
-        azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_KEY")
-        # Menggunakan deployment_name dari argumen fungsi, bukan dari env var secara langsung di sini
-        # deployment_name_to_use = deployment_name if deployment_name else os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
-        
-        if not deployment_name:
-            # Fallback atau error jika tidak ada deployment_name yang disediakan, sesuai kebutuhan
-            # Untuk saat ini, kita asumsikan deployment_name akan selalu ada jika Azure dipilih
-            # Atau bisa menggunakan default dari environment variable jika tidak ada yang dipilih
-            default_deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
-            if not default_deployment_name:
-                raise ValueError("Azure OpenAI deployment name not provided and no default in environment.")
-            deployment_name_to_use = default_deployment_name
-            st.warning(f"Azure deployment name not explicitly selected, using default: {deployment_name_to_use}")
-        else:
-            deployment_name_to_use = deployment_name
-
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": api_key,
-        }
-        
-        payload = {
-            "messages": [{"role": "system", "content": "You are a veterinary expert assistant."}, 
-                         {"role": "user", "content": prompt}],
-            "max_tokens": 800
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{azure_endpoint}/openai/deployments/{deployment_name_to_use}/chat/completions?api-version=2025-01-01-preview",
-                headers=headers,
-                json=payload
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    error_text = await response.text()
-                    st.error(f"Error from Azure OpenAI API: {error_text}")
-                    return f"Failed to generate recommendation. Error: {error_text}"
-    except Exception as e:
-        return f"Error connecting to Azure OpenAI: {str(e)}"
-
-# RAG Pipeline
-async def rag_pipeline(disease, llm_choice, azure_deployment_name=None):
+# Main RAG Pipeline function
+async def rag_pipeline(query, llm_choice, azure_deployment_name=None, user_question=None, predicted_disease=None, chat_history=None):
     """Complete RAG pipeline for generating recommendations"""
     try:
-        # 1. Create query from disease
-        query = f"chicken disease {disease} symptoms treatment prevention"
+        # Use the question or query as the main input
+        main_query = user_question if user_question else query
         
-        # 2. Search Supabase for relevant documents
-        results = await query_supabase_async(vector_store, query)
-        if not results or not results.get("matches"):
-            context = "No relevant information found in the knowledge base."
-        else:
-            context = "\n\n".join([match.get("metadata", {}).get("text", "") 
-                                for match in results.get("matches", [])])
+        # Convert chat_history to LangChain message format if needed
+        langchain_history = []
+        if chat_history:
+            for msg in chat_history:
+                if msg.get("role") == "user":
+                    langchain_history.append(HumanMessage(content=msg.get("content", "")))
+                elif msg.get("role") == "assistant":
+                    langchain_history.append(AIMessage(content=msg.get("content", "")))
         
-        # 3. Generate response based on LLM choice
         if llm_choice == "Azure OpenAI":
-            recommendation = await generate_recommendation_azure_async(disease, context, deployment_name=azure_deployment_name)
-        else:  # Ollama
-            recommendation = await generate_recommendation_ollama_async(disease, context)
+            # Use agent-based approach for Azure OpenAI
+            result = rag_pipeline_agent_azure(
+                main_query,
+                chat_history=langchain_history,
+                predicted_disease=predicted_disease,
+                azure_deployment_name=azure_deployment_name or "gpt-4o"
+            )
+            return result
+        else:
+            # Use Ollama approach
+            result = await rag_pipeline_ollama(
+                main_query,
+                chat_history=langchain_history,
+                predicted_disease=predicted_disease
+            )
+            return result
             
-        return recommendation
-    
     except Exception as e:
         st.error(f"Error in RAG pipeline: {str(e)}")
-        # Fallback to generate a response without RAG
-        if llm_choice == "Azure OpenAI":
-            return await generate_recommendation_azure_async(disease, "", deployment_name=azure_deployment_name)
-        else:
-            return await generate_recommendation_ollama_async(disease, "")
+        return f"Terjadi kesalahan dalam memproses pertanyaan: {str(e)}"
+
+# Legacy compatibility functions for backward compatibility
+async def generate_recommendation_azure_async(disease, context="", deployment_name=None, user_question=None):
+    """Legacy compatibility function for Azure OpenAI"""
+    return await rag_pipeline(
+        query=disease,
+        llm_choice="Azure OpenAI",
+        azure_deployment_name=deployment_name,
+        user_question=user_question,
+        predicted_disease=disease
+    )
+
+async def generate_recommendation_ollama_async(disease, context="", user_question=None):
+    """Legacy compatibility function for Ollama"""
+    return await rag_pipeline(
+        query=disease,
+        llm_choice="Ollama",
+        user_question=user_question,
+        predicted_disease=disease
+    )

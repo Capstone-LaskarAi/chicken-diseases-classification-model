@@ -72,8 +72,8 @@ def extract_weights_directly(h5_path):
         print(f"Error accessing H5 file: {str(e)}")
         return False
 
-def fix_batch_shape_error(input_model_path="model/chicken_disease_model.h5",
-                         output_model_path="model/chicken_disease_model_fixed.h5",
+def fix_batch_shape_error(input_model_path="model/fix_chicken_disease_model.h5",
+                         output_model_path="model/updated_model.h5",
                          output_saved_model_path="saved_model"):
     """
     Fix the 'batch_shape' parameter error by:
