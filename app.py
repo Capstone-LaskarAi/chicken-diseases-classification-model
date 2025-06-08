@@ -87,11 +87,12 @@ def main():
     if 'processed_image' not in st.session_state:
         st.session_state.processed_image = None
     if 'llm_choice' not in st.session_state:
-        st.session_state.llm_choice = "Ollama (Llama 3.2)"
+        st.session_state.llm_choice = "Azure OpenAI"
     if 'azure_deployment_name' not in st.session_state:
-        st.session_state.azure_deployment_name = "gpt-4.1" # Default Azure model    if 'chat_history' not in st.session_state:
+        st.session_state.azure_deployment_name = "gpt-4o" # Default Azure model
+    if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []  # Store as simple dict format for compatibility
-    
+
     # Create tabs
     tab1, tab2 = st.tabs(["Upload & Diagnose", "AI Vet Chatbot"])
     
