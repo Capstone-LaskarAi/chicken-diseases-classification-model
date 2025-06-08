@@ -98,7 +98,7 @@ def main():
     # LLM selection in sidebar
     with st.sidebar:
         st.title("Settings")
-        llm_choice_options = ["Ollama (Llama 3.2)", "Azure OpenAI"]
+        llm_choice_options = ["Azure OpenAI", "Ollama (Llama 3.2)"]
         llm_choice = st.radio(
             "Select LLM for recommendations:",
             llm_choice_options,
