@@ -78,6 +78,7 @@ pip install -r requirements.txt
    # or if using Azure:
    AZURE_OPENAI_ENDPOINT=your_azure_openai_endpoint
    AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+   AZURE_OPENAI_DEPLOYMENT_NAME=your_azure_openapi_deployment_name
    ```
 3. Save the `.env` file.
 
