@@ -137,7 +137,3 @@ pip install -r requirements.txt
 - **Augmentation:** Rotation, zoom, flipping, and balancing with SMOTE.
 - **Evaluation:** Validation accuracy 97%, test accuracy 95.9%.
 - **RAG:** Document-based Q&A feature using Pinecone and LLM.
-
----
-
-**Good luck! For further questions, please check the main README.md or contact the development team.**
