@@ -205,8 +205,9 @@ def main():
         - LLM: Llama 3.2 (Ollama) or Gpt-4.1 (Azure)
         """)
         
+        # Sample images section for testing
         st.markdown("---")
-        st.markdown("### Sample Images (QA/Testing)")
+        st.markdown("### Sample Images (Demo/Testing)")
         samples = list_samples()
         if samples:
             classes = sorted(samples.keys())
@@ -226,7 +227,7 @@ def main():
                     st.session_state.show_typing_animation = False
                     st.rerun()
         else:
-            st.info("Sample folder not found or empty.")
+            st.info("Sample images not available. Upload your own image to test.")
     with tab1:
         st.header("Upload Chicken Feces Image")
         
