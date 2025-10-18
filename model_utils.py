@@ -9,6 +9,9 @@ from tensorflow.keras.preprocessing import image
 IMG_SIZE = (224, 224)
 CLASS_LABELS = ['Coccidiosis', 'Healthy', 'Newcastle Disease', 'Salmonella']
 
+# Model cache to avoid repeated loading
+_MODEL_CACHE = {"model": None}
+
 # Check for batch_shape error fix availability
 try:
     from fix_batch_shape_error import fix_batch_shape_error, create_fresh_model
@@ -92,6 +95,13 @@ def convert_model_if_needed(model_path="model/fix_chicken_disease_model.h5", for
 # Load the model with special handling for TensorFlow compatibility issues
 @st.cache_resource
 def load_model():
+    """
+    Cached loader to avoid repeated disk I/O and initialization costs.
+    """
+    # Check if model is already cached
+    if _MODEL_CACHE["model"] is not None:
+        return _MODEL_CACHE["model"]
+    
     try:
         # First try the fixed model if it exists
         if os.path.exists("model/updated_model.h5"):
@@ -99,6 +109,7 @@ def load_model():
                 st.info("Attempting to load fixed model version...")
                 model = tf.keras.models.load_model("model/updated_model.h5")
                 st.success("Fixed model loaded successfully!")
+                _MODEL_CACHE["model"] = model
                 return model
             except Exception as fixed_error:
                 st.warning(f"Fixed model loading failed: {str(fixed_error)}")
@@ -110,6 +121,7 @@ def load_model():
                 # Use the saved model directory which should be more compatible
                 model = tf.saved_model.load("saved_model")
                 st.success("Model loaded from saved_model directory!")
+                _MODEL_CACHE["model"] = model
                 return model
             except Exception as saved_model_error:
                 st.warning(f"SavedModel loading failed: {str(saved_model_error)}")
@@ -119,6 +131,7 @@ def load_model():
             st.info("Attempting standard model loading...")
             model = tf.keras.models.load_model("model/fix_chicken_disease_model.h5")
             st.success("Model loaded successfully!")
+            _MODEL_CACHE["model"] = model
             return model
         except Exception as first_error:
             error_msg = str(first_error)

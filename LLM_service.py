@@ -22,38 +22,75 @@ os.environ["AZURE_OPENAI_ENDPOINT"] = os.getenv("AZURE_OPENAI_ENDPOINT")
 os.environ["AZURE_OPENAI_API_KEY"] = os.getenv("AZURE_OPENAI_KEY")
 os.environ["AZURE_OPENAI_API_VERSION"] = "2024-02-01"
 
-# initiating pinecone
-pc = PineconeClient(api_key=os.getenv("PINECONE_API_KEY"))
-index = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
+# Caches to reduce latency
+_EMBEDDINGS = None
+_VECTORSTORE = None
+_RETRIEVER = None
+_LLM_AZURE = {}
+_PINECONE_CLIENT = None
+_PINECONE_INDEX = None
 
-# initiating embeddings model
-embeddings = AzureOpenAIEmbeddings(
-    model="text-embedding-3-large",
-    azure_deployment="text-embedding-3-large",
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_KEY"),
-    api_version="2024-02-01"
-)
+def _get_pinecone_client():
+    global _PINECONE_CLIENT
+    if _PINECONE_CLIENT is None:
+        _PINECONE_CLIENT = PineconeClient(api_key=os.getenv("PINECONE_API_KEY"))
+    return _PINECONE_CLIENT
 
-# initiating vector store
-vector_store = Pinecone.from_existing_index(
-    index_name=os.getenv("PINECONE_INDEX_NAME"),
-    embedding=embeddings,
-    namespace="chickbot_docs"
-)
+def _get_pinecone_index():
+    global _PINECONE_INDEX
+    if _PINECONE_INDEX is None:
+        pc = _get_pinecone_client()
+        _PINECONE_INDEX = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
+    return _PINECONE_INDEX
+
+def _get_embeddings():
+    global _EMBEDDINGS
+    if _EMBEDDINGS is None:
+        _EMBEDDINGS = AzureOpenAIEmbeddings(
+            model="text-embedding-3-large",
+            azure_deployment="text-embedding-3-large",
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version="2024-02-01"
+        )
+    return _EMBEDDINGS
+
+def _get_vectorstore():
+    global _VECTORSTORE
+    if _VECTORSTORE is None:
+        _VECTORSTORE = Pinecone.from_existing_index(
+            index_name=os.getenv("PINECONE_INDEX_NAME"),
+            embedding=_get_embeddings(),
+            namespace="chickbot_docs"
+        )
+    return _VECTORSTORE
+
+# Initialize cached instances
+pc = _get_pinecone_client()
+index = _get_pinecone_index()
+embeddings = _get_embeddings()
+vector_store = _get_vectorstore()
 
 # initiating llm - support both Azure and Ollama
 def get_llm(llm_choice="Azure OpenAI", azure_deployment_name="gpt-4o"):
-    """Get LLM based on choice"""
+    """Get LLM based on choice with caching"""
+    global _LLM_AZURE
+    
     if llm_choice == "Azure OpenAI":
-        return AzureChatOpenAI(
-            model="gpt-4o",
-            azure_deployment=azure_deployment_name,
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_key=os.getenv("AZURE_OPENAI_KEY"),
-            api_version="2024-02-01",
-            temperature=0
-        )
+        # Cache LLM instances per deployment
+        if azure_deployment_name not in _LLM_AZURE:
+            _LLM_AZURE[azure_deployment_name] = AzureChatOpenAI(
+                model="gpt-4o",
+                azure_deployment=azure_deployment_name,
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                api_key=os.getenv("AZURE_OPENAI_KEY"),
+                api_version="2024-02-01",
+                temperature=0.2,
+                max_tokens=1500,
+                streaming=True,
+                timeout=20
+            )
+        return _LLM_AZURE[azure_deployment_name]
     else:
         # For Ollama, we'll use a simple fallback since langchain-community doesn't have direct Ollama support
         # We'll handle this in the pipeline
@@ -72,9 +109,12 @@ def is_poultry_related_question(question: str) -> bool:
         'treatment', 'obat', 'medicine', 'vaksin', 'vaccine', 'pencegahan', 
         'prevention', 'ternak', 'peternakan', 'farm', 'kandang', 'coop',
         'virus', 'bakteri', 'parasit', 'infeksi', 'infection', 'flu burung',
-        'Newcastle', 'tetelo', 'berak kapur', 'snot', 'crd', 'coryza',
+        'newcastle', 'tetelo', 'berak kapur', 'snot', 'crd', 'coryza',
         'kolera', 'cholera', 'cacingan', 'kutu', 'tungau', 'stress panas', 
-        'tabel', 'healthy', 'detected', 'image', 'analysis'
+        'tabel', 'healthy', 'detected', 'image', 'analysis', 'coccidiosis',
+        'salmonella', 'feces', 'fecal', 'kotoran', 'tinja', 'diagnos',
+        'rekomendasi', 'recommendation', 'saran', 'advice', 'tindakan', 'action',
+        'apa', 'bagaimana', 'kenapa', 'mengapa', 'how', 'what', 'why', 'when'
     ]
     
     question_lower = question.lower()
@@ -84,67 +124,7 @@ def is_poultry_related_question(question: str) -> bool:
 @tool(response_format="content_and_artifact")
 def retrieve(query: str):
     """Retrieve information related to a query."""
-    retrieved_docs = vector_store.similarity_search(query, k=2)
-    serialized = "\n\n".join(
-        (f"Source: {doc.metadata}\n" f"Content: {doc.page_content}")
-        for doc in retrieved_docs
-    )
-    return serialized, retrieved_docs
-
-# combining all tools
-tools = [retrieve]
-
-# initiating vector store
-vector_store = Pinecone.from_existing_index(
-    index_name=os.getenv("PINECONE_INDEX_NAME"),
-    embedding=embeddings,
-    namespace="chickbot_docs"
-)
-
-# initiating llm - support both Azure and Ollama
-def get_llm(llm_choice="Azure OpenAI", azure_deployment_name="gpt-4o"):
-    """Get LLM based on choice"""
-    if llm_choice == "Azure OpenAI":
-        return AzureChatOpenAI(
-            model="gpt-4o",
-            azure_deployment=azure_deployment_name,
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_key=os.getenv("AZURE_OPENAI_KEY"),
-            api_version="2024-02-01",
-            temperature=0
-        )
-    else:
-        # For Ollama, we'll use a simple fallback since langchain-community doesn't have direct Ollama support
-        # We'll handle this in the pipeline
-        return None
-
-# pulling prompt from hub
-prompt = hub.pull("hwchase17/openai-functions-agent")
-
-# function to check if question is related to chicken/poultry disease management
-def is_poultry_related_question(question: str) -> bool:
-    """Check if the question is related to chicken/poultry disease management."""
-    # Keywords related to poultry and diseases
-    poultry_keywords = [
-        'ayam', 'unggas', 'chicken', 'poultry', 'bebek', 'itik', 'burung', 
-        'penyakit', 'disease', 'sakit', 'gejala', 'symptoms', 'pengobatan', 
-        'treatment', 'obat', 'medicine', 'vaksin', 'vaccine', 'pencegahan', 
-        'prevention', 'ternak', 'peternakan', 'farm', 'kandang', 'coop',
-        'virus', 'bakteri', 'parasit', 'infeksi', 'infection', 'flu burung',
-        'Newcastle', 'tetelo', 'berak kapur', 'snot', 'crd', 'coryza',
-        'kolera', 'cholera', 'cacingan', 'kutu', 'tungau', 'stress panas', 'tabel',
-        'healthy', 'detected', 'image', 'analysis', 'coccidiosis', 'salmonella', 'newcastle disease',
-        
-    ]
-    
-    question_lower = question.lower()
-    return any(keyword.lower() in question_lower for keyword in poultry_keywords)
-
-# creating the retriever tool
-@tool(response_format="content_and_artifact")
-def retrieve(query: str):
-    """Retrieve information related to a query."""
-    retrieved_docs = vector_store.similarity_search(query, k=2)
+    retrieved_docs = vector_store.similarity_search(query, k=3)
     serialized = "\n\n".join(
         (f"Source: {doc.metadata}\n" f"Content: {doc.page_content}")
         for doc in retrieved_docs
@@ -171,8 +151,9 @@ def rag_pipeline_agent_azure(query, chat_history=None, predicted_disease=None, a
         else:
             enhanced_query = query
             
-        # Check if the question is related to poultry disease management
-        if is_poultry_related_question(enhanced_query):
+        # If we have predicted_disease, always process the query (don't check keywords)
+        # Only check keywords if there's no predicted_disease context
+        if predicted_disease or is_poultry_related_question(enhanced_query):
             # invoking the agent
             result = agent_executor.invoke({
                 "input": enhanced_query, 
@@ -194,7 +175,7 @@ async def rag_pipeline_ollama(query, chat_history=None, predicted_disease=None):
     
     try:
         # Search for relevant documents
-        retrieved_docs = vector_store.similarity_search(query, k=2)
+        retrieved_docs = vector_store.similarity_search(query, k=3)
         context = "\n\n".join([doc.page_content for doc in retrieved_docs])
         
         # Create prompt for Ollama
@@ -217,8 +198,9 @@ async def rag_pipeline_ollama(query, chat_history=None, predicted_disease=None):
         Pertanyaan: {enhanced_query}
         """
         
-        # Check if question is poultry-related
-        if not is_poultry_related_question(enhanced_query):
+        # If we have predicted_disease, always process the query (don't check keywords)
+        # Only check keywords if there's no predicted_disease context
+        if not predicted_disease and not is_poultry_related_question(enhanced_query):
             return "Maaf ya, aku belum nemu info yang cocok sama pertanyaan kamu dari data yang ada."
         
         # Call Ollama API

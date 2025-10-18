@@ -6,11 +6,36 @@ import numpy as np
 from PIL import Image
 import logging
 import os
+import re
+from pathlib import Path
 
 # Import dari modul terpisah
 from model_utils import load_model, preprocess_image, predict_disease, CLASS_LABELS
 from LLM_service import rag_pipeline
 from langchain_core.messages import HumanMessage, AIMessage
+from dummy_test_data import list_samples
+
+# Helper: per-word typing animation for assistant responses
+def render_typing_text(text: str, placeholder, delay: float = 0.03):
+    """Display text with per-word typing animation while preserving whitespace"""
+    tokens = re.split(r"(\s+)", text)
+    buffer = ""
+    for token in tokens:
+        buffer += token
+        placeholder.markdown(buffer + " ▌")
+        time.sleep(delay)
+    placeholder.markdown(buffer)
+
+# Helper: Show loading animation
+def show_loading_animation():
+    """Display animated loading indicator"""
+    spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    placeholder = st.empty()
+    for frame in spinner_frames:
+        placeholder.markdown(f"**{frame} Processing your request...**")
+        time.sleep(0.1)
+    placeholder.empty()
+    return placeholder
 
 # Fungsi untuk menyimpan gambar yang diupload
 def save_uploaded_image(uploaded_file):
@@ -71,6 +96,30 @@ def main():
         background-color: rgba(255, 0, 0, 0.2);
         border: 1px solid red;
     }
+    /* Loading animation */
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    .loading-dots {
+        display: inline-block;
+        animation: pulse 1.5s infinite;
+    }
+    /* Fixed chat input at bottom */
+    .fixed-chat-input {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background-color: #0e1117;
+        padding: 1rem;
+        border-top: 1px solid #30363d;
+        z-index: 100;
+    }
+    .chat-history-container {
+        padding-bottom: 120px;
+        overflow-y: auto;
+    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -92,9 +141,37 @@ def main():
         st.session_state.azure_deployment_name = "gpt-4o" # Default Azure model
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []  # Store as simple dict format for compatibility
+    if 'demo_img_path' not in st.session_state:
+        st.session_state.demo_img_path = None
+    if 'demo_img_label' not in st.session_state:
+        st.session_state.demo_img_label = None
+    if 'saved_image_path' not in st.session_state:
+        st.session_state.saved_image_path = None
+    if 'show_typing_animation' not in st.session_state:
+        st.session_state.show_typing_animation = False
+    if 'chat_pending_llm' not in st.session_state:
+        st.session_state.chat_pending_llm = False
+    if 'pending_question' not in st.session_state:
+        st.session_state.pending_question = None
+    if 'switch_to_tab2' not in st.session_state:
+        st.session_state.switch_to_tab2 = False
 
     # Create tabs
     tab1, tab2 = st.tabs(["Upload & Diagnose", "AI Vet Chatbot"])
+
+    if st.session_state.switch_to_tab2:
+        st.session_state.switch_to_tab2 = False
+        st.markdown(
+            """
+            <script>
+            const tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+            if (tabs.length > 1) {
+                tabs[1].click();
+            }
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
     
     # LLM selection in sidebar
     with st.sidebar:
@@ -109,11 +186,12 @@ def main():
 
         # Azure model selection - only show if Azure OpenAI is selected
         if st.session_state.llm_choice == "Azure OpenAI":
-            azure_model_options = ["gpt-4.1", "gpt-4o", "gpt-4o-mini", "grok-3-mini"]
+            azure_model_options = ["gpt-4.1", "gpt-4o", "DeepSeek-R1-0528"]
+            default_idx = azure_model_options.index(st.session_state.azure_deployment_name) if st.session_state.azure_deployment_name in azure_model_options else 1
             azure_deployment_name = st.selectbox(
                 "Select Azure OpenAI Model:",
                 azure_model_options,
-                index=azure_model_options.index(st.session_state.azure_deployment_name) # Set initial value
+                index=default_idx
             )
             st.session_state.azure_deployment_name = azure_deployment_name
         
@@ -126,8 +204,29 @@ def main():
         - Text embedding: text-embedding-3-large (Azure OpenAI)
         - LLM: Llama 3.2 (Ollama) or Gpt-4.1 (Azure)
         """)
-    
-    # Tab 1: Upload & Diagnose
+        
+        st.markdown("---")
+        st.markdown("### Sample Images (QA/Testing)")
+        samples = list_samples()
+        if samples:
+            classes = sorted(samples.keys())
+            sel_cls = st.selectbox("Class", classes, index=0)
+            files = samples.get(sel_cls, [])
+            if files:
+                sel_file = st.selectbox("File", files, index=0, format_func=lambda p: Path(p).name)
+                if st.button("Load sample image"):
+                    st.session_state.demo_img_path = sel_file
+                    st.session_state.demo_img_label = sel_cls
+                    # reset previous outputs and chat history
+                    st.session_state.predicted_disease = None
+                    st.session_state.confidence = None
+                    st.session_state.recommendation = None
+                    st.session_state.chat_history = []
+                    st.session_state.processed_image = None
+                    st.session_state.show_typing_animation = False
+                    st.rerun()
+        else:
+            st.info("Sample folder not found or empty.")
     with tab1:
         st.header("Upload Chicken Feces Image")
         
@@ -136,37 +235,62 @@ def main():
         
         col1, col2 = st.columns([1, 1])
         
+        # Source image: uploaded file takes priority, otherwise demo
+        img = None
+        src_caption = None
         if uploaded_file is not None:
+            img = Image.open(uploaded_file)
+            src_caption = "Uploaded Image"
+            saved_path = save_uploaded_image(uploaded_file)
+            if saved_path:
+                st.session_state.saved_image_path = saved_path
+        elif st.session_state.demo_img_path:
+            try:
+                img = Image.open(st.session_state.demo_img_path)
+                src_caption = f"Sample Image — {st.session_state.demo_img_label}"
+            except Exception as e:
+                st.warning(f"Failed to open sample image: {e}")
+                st.session_state.demo_img_path = None
+        
+        if img is not None:
             # Display uploaded image
             with col1:
-                st.subheader("Uploaded Image")
-                img = Image.open(uploaded_file)
-                st.image(img, width=350, caption="Uploaded Image")
-                
-                # Save image for record-keeping
-                saved_path = save_uploaded_image(uploaded_file)
-                if saved_path:
-                    st.session_state.saved_image_path = saved_path
+                st.subheader(src_caption)
+                st.image(img, width=350, caption=src_caption)
             
-            # Process image and make prediction when button is clicked
-            if st.button("Analyze Image"):
+            # Action buttons
+            action_col1, action_col2 = st.columns(2)
+
+            with action_col1:
+                analyze_clicked = st.button("Analyze Image", use_container_width=True)
+
+            with action_col2:
+                chat_clicked = st.button(
+                    "💬 Go to AI Vet Chatbot",
+                    use_container_width=True,
+                    disabled=st.session_state.predicted_disease is None,
+                    key="go_to_chatbot_tab1"
+                )
+
+            if analyze_clicked:
                 with st.spinner("Analyzing image..."):
-                    # Load model
                     model = load_model()
-                    
+
                     if model is not None:
-                        # Preprocess image
                         img_array = preprocess_image(img)
                         st.session_state.processed_image = img_array
-                        
-                        # Make prediction
+
                         predicted_disease, confidence = predict_disease(model, img_array)
-                        
+
                         if predicted_disease:
                             st.session_state.predicted_disease = predicted_disease
                             st.session_state.confidence = confidence
                         else:
                             st.error("Failed to make a prediction. Please try again.")
+
+            if st.session_state.predicted_disease and chat_clicked:
+                st.session_state.switch_to_tab2 = True
+                st.rerun()
             
             # Display prediction results
             with col2:
@@ -220,78 +344,92 @@ def main():
         
         if st.session_state.predicted_disease:
             st.info(f"Based on the image analysis, the system has detected: **{st.session_state.predicted_disease}**")
-            
-            if st.button("Generate Recommendations"):
-                with st.spinner("Generating expert recommendations..."):
-                    start_time = time.time()
-                      # Generate recommendation using RAG pipeline with selected LLM
+
+            # Button untuk generate recommendation
+            if st.button("Generate Veterinary Recommendations", use_container_width=True, key="generate_rec_tab2"):
+                with st.spinner("🔄 Generating expert recommendations..."):
                     llm_selection = "Azure OpenAI" if st.session_state.llm_choice == "Azure OpenAI" else "Ollama"
                     azure_deployment_to_use = st.session_state.azure_deployment_name if llm_selection == "Azure OpenAI" else None
-                    
+
                     recommendation = asyncio.run(rag_pipeline(
-                        st.session_state.predicted_disease, 
-                        llm_selection,
-                        azure_deployment_name=azure_deployment_to_use,
-                        chat_history=st.session_state.chat_history
-                    ))
-                    
-                    st.session_state.recommendation = recommendation
-                    
-                    end_time = time.time()
-                    generation_time = end_time - start_time
-            
-            # Display recommendation if available
-            if st.session_state.recommendation:
-                st.subheader("Veterinary Recommendations")
-                st.markdown(st.session_state.recommendation)
-                
-                # Disclaimer
-                st.markdown("---")
-                st.markdown("""
-                **Disclaimer**: This is an AI-generated recommendation based on image analysis. 
-                Always consult with a qualified veterinarian for a proper diagnosis and treatment plan.
-                """)
-        else:
-            st.warning("Please upload and analyze an image in the 'Upload & Diagnose' tab first.")
-        
-        # Chat history section
-        st.subheader("Ask Follow-up Questions")
-        
-        # Create a container for chat messages
-        chat_container = st.container()
-          # Display chat history in the container
-        with chat_container:
-            for message in st.session_state.chat_history:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-        
-        # Chat input - this will naturally appear at the bottom
-        if st.session_state.predicted_disease:  # Only show if we have a prediction
-            user_question = st.chat_input("Ask a question about this condition...")
-            
-            if user_question:
-                # Add user message to chat history
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                  # Generate response
-                with st.spinner("Thinking..."):
-                    # Use the new rag_pipeline with chat history
-                    llm_selection = "Azure OpenAI" if st.session_state.llm_choice == "Azure OpenAI" else "Ollama"
-                    azure_deployment_to_use = st.session_state.azure_deployment_name if llm_selection == "Azure OpenAI" else None
-                    
-                    response = asyncio.run(rag_pipeline(
                         st.session_state.predicted_disease,
                         llm_selection,
                         azure_deployment_name=azure_deployment_to_use,
-                        user_question=user_question,
-                        predicted_disease=st.session_state.predicted_disease,
-                        chat_history=st.session_state.chat_history
+                        chat_history=[]
                     ))
-                    
-                    # Add assistant response to chat history
-                    st.session_state.chat_history.append({"role": "assistant", "content": response})
-                    
-                    # Rerun to update the display
-                    st.rerun()
+
+                st.session_state.recommendation = recommendation
+                st.session_state.show_typing_animation = True
+                st.session_state.chat_history = [{"role": "assistant", "content": recommendation}]
+                st.rerun()
+
+            if st.session_state.recommendation:
+                st.subheader("Veterinary Recommendations")
+
+                if st.session_state.show_typing_animation:
+                    placeholder = st.empty()
+                    render_typing_text(st.session_state.recommendation, placeholder)
+                    st.session_state.show_typing_animation = False
+                else:
+                    st.markdown(st.session_state.recommendation)
+
+                st.markdown("---")
+                st.markdown(
+                    """
+                    **Disclaimer**: This is an AI-generated recommendation based on image analysis. 
+                    Always consult with a qualified veterinarian for a proper diagnosis and treatment plan.
+                    """
+                )
+        else:
+            st.warning("Please upload and analyze an image in the 'Upload & Diagnose' tab first.")
+
+        st.markdown("---")
+        st.subheader("Ask Follow-up Questions")
+
+        # Display chat history
+        st.markdown('<div class="chat-history-container">', unsafe_allow_html=True)
+        chat_messages_to_display = st.session_state.chat_history[1:] if len(st.session_state.chat_history) > 1 else []
+
+        for message in chat_messages_to_display:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Trigger LLM response if a question is pending
+        if st.session_state.chat_pending_llm and st.session_state.pending_question:
+            with st.chat_message("assistant"):
+                with st.spinner("Preparing expert response..."):
+                    llm_selection = "Azure OpenAI" if st.session_state.llm_choice == "Azure OpenAI" else "Ollama"
+                    azure_deployment_to_use = (
+                        st.session_state.azure_deployment_name if llm_selection == "Azure OpenAI" else None
+                    )
+
+                    response = asyncio.run(
+                        rag_pipeline(
+                            st.session_state.predicted_disease,
+                            llm_selection,
+                            azure_deployment_name=azure_deployment_to_use,
+                            user_question=st.session_state.pending_question,
+                            chat_history=st.session_state.chat_history[:-1],
+                        )
+                    )
+
+            st.session_state.chat_history.append({"role": "assistant", "content": response})
+            st.session_state.chat_pending_llm = False
+            st.session_state.pending_question = None
+            st.rerun()
+
+        if st.session_state.predicted_disease:
+            st.markdown('<div class="fixed-chat-input">', unsafe_allow_html=True)
+            user_question = st.chat_input("Ask a question about this condition...")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            if user_question:
+                st.session_state.chat_history.append({"role": "user", "content": user_question})
+                st.session_state.pending_question = user_question
+                st.session_state.chat_pending_llm = True
+                st.rerun()
         else:
             st.info("Upload and analyze an image first to enable the chat feature.")
 
